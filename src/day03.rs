@@ -4,23 +4,17 @@
 struct Rucksack<'s>(&'s str);
 
 impl Rucksack<'_> {
-	fn compartments(&self) -> [&str; 2] {
-		let half_len = self.0.len() / 2;
-		[&self.0[..half_len], &self.0[half_len..]]
+	fn as_items(&self) -> &[u8] {
+		self.0.as_bytes()
 	}
 
-	fn prioritize_common_items<'i>(common_item: impl Iterator<Item = &'i u8>) -> u64 {
-		use itertools::Itertools as _;
-		let common_item = match common_item.exactly_one() {
-			Ok(&b) => b,
-			Err(i) => panic!("Not exactly 1: {:?}", i.size_hint()),
-		};
-		let priority = if common_item >= b'a' { 1 + common_item - b'a' }
-			else { 27 + common_item - b'A' } as u64;
-		#[cfg(LOGGING)]
-		println!("{common_item} ({}): {priority}", common_item as char);
-		#[allow(clippy::let_and_return)]
-		priority
+	fn as_compartments_items(&self) -> [&[u8]; 2] {
+		let half_len = self.0.len() / 2;
+		[self.0[..half_len].as_bytes(), self.0[half_len..].as_bytes()]
+	}
+
+	fn item_priority(item: u8) -> u8 {
+		if item >= b'a' { 1 + item - b'a' } else { 27 + item - b'A' }
 	}
 }
 
@@ -35,13 +29,19 @@ fn input_rucksacks() -> impl Iterator<Item = Rucksack<'static>> {
 
 
 fn part1_impl<'s>(input_rucksacks: impl Iterator<Item = Rucksack<'s>>) -> u64 {
-	use std::collections::HashSet;
+	// As seen on ThePrimeagen’s stream (author unknown?):
+	// https://www.twitch.tv/videos/1669214699 (starting at 1:21:41)
 	input_rucksacks
-		.map(|r| {
-			let [c0, c1] = r.compartments();
-			let s0 = HashSet::<u8>::from_iter(c0.bytes());
-			let s1 = HashSet::<u8>::from_iter(c1.bytes());
-			Rucksack::prioritize_common_items(s0.intersection(&s1))
+		.map(|rucksack| {
+			let compartments_items = rucksack.as_compartments_items();
+			let mut seen = [false; 52];
+			for &item in compartments_items[0] {
+				seen[Rucksack::item_priority(item) as usize - 1] = true
+			}
+			compartments_items[1].iter().find_map(|&item| {
+				let item_priority = Rucksack::item_priority(item);
+				seen[item_priority as usize - 1].then_some(item_priority)
+			}).unwrap() as u64
 		})
 		.sum()
 }
@@ -52,18 +52,25 @@ pub(crate) fn part1() -> u64 {
 
 
 fn part2_impl<'s>(input_rucksacks: impl Iterator<Item = Rucksack<'s>>) -> u64 {
-	use {std::collections::HashSet, itertools::Itertools};
+	// As seen on ThePrimeagen’s stream (author unknown?):
+	// https://www.twitch.tv/videos/1669214699 (starting at 1:21:41)
+	use itertools::Itertools as _;
 	input_rucksacks
+		// TODO(bm-w): Use `array_chunks` once it’s stabilized
 		.chunks(3)
 		.into_iter()
-		.map(|chunk| {
-			let mut ss = chunk.into_iter().map(|r| HashSet::<u8>::from_iter(r.0.bytes()));
-			Rucksack::prioritize_common_items(ss.next().unwrap()
-				.intersection(&ss.next().unwrap())
-				.copied()
-				.collect::<HashSet<_>>()
-				.intersection(&ss.next().unwrap()))
-		})
+		.map(|chunk| chunk.into_iter().enumerate()
+			.scan([0_u8; 52], |bit_counts, (i, rucksack)| {
+				for &item in rucksack.as_items() {
+					let item_priority = Rucksack::item_priority(item);
+					let bit_count = &mut bit_counts[item_priority as usize - 1];
+					*bit_count |= 1 << i;
+					if *bit_count == 0b111 { return Some(Some(item_priority)) }
+				}
+				Some(None)
+			})
+			.flatten()
+			.next().unwrap() as u64)
 		.sum()
 }
 
