@@ -30,35 +30,34 @@ pub(crate) fn part2() -> usize {
 
 #[cfg(test)]
 mod tests {
+	use test_case::test_case;
 	use super::*;
+
+	#[test_case("mjqjpqmgbljsphdztnvjfqwrcgsmlb", 7; "a")]
+	#[test_case("bvwbjplbgvbhsrlpgdmjqwftvncz", 5; "b")]
+	#[test_case("nppdvjthqldpwncqszvftbrmjlhg", 6; "c")]
+	#[test_case("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg", 10; "d")]
+	#[test_case("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw", 11; "e")]
+	fn part1_impl(input_buffer_stream: &str, offset: usize) {
+		assert_eq!(part1and2_impl::<4>(input_buffer_stream), offset);
+	}
 
 	#[test]
 	fn part1() {
-		const INPUTS_ANSWERS: [(&str, usize); 5] = [
-			("mjqjpqmgbljsphdztnvjfqwrcgsmlb", 7),
-			("bvwbjplbgvbhsrlpgdmjqwftvncz", 5),
-			("nppdvjthqldpwncqszvftbrmjlhg", 6),
-			("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg", 10),
-			("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw", 11),
-		];
-		for (input, answer) in INPUTS_ANSWERS {
-			assert_eq!(part1and2_impl::<4>(input), answer);
-		}
 		assert_eq!(super::part1(), 1953);
+	}
+
+	#[test_case("mjqjpqmgbljsphdztnvjfqwrcgsmlb", 19; "a")]
+	#[test_case("bvwbjplbgvbhsrlpgdmjqwftvncz", 23; "b")]
+	#[test_case("nppdvjthqldpwncqszvftbrmjlhg", 23; "c")]
+	#[test_case("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg", 29; "d")]
+	#[test_case("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw", 26; "e")]
+	fn part2_impl(input_buffer_stream: &str, offset: usize) {
+		assert_eq!(part1and2_impl::<14>(input_buffer_stream), offset);
 	}
 
 	#[test]
 	fn part2() {
-		const INPUTS_ANSWERS: [(&str, usize); 5] = [
-			("mjqjpqmgbljsphdztnvjfqwrcgsmlb", 19),
-			("bvwbjplbgvbhsrlpgdmjqwftvncz", 23),
-			("nppdvjthqldpwncqszvftbrmjlhg", 23),
-			("nznrnfrfntjfmvfwmzdfjlvtqnbhcprsg", 29),
-			("zcfzfwzzqfrljwzlrfnpqdbhtmscgvjw", 26),
-		];
-		for (input, answer) in INPUTS_ANSWERS {
-			assert_eq!(part1and2_impl::<14>(input), answer);
-		}
 		assert_eq!(super::part2(), 2301);
 	}
 }
