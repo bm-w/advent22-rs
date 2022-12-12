@@ -177,12 +177,12 @@ mod tests {
 
 		#[bench]
 		fn part1(b: &mut test::Bencher) {
-			b.iter(|| assert_eq!(super::super::part1(), 6314))
+			b.iter(|| super::part1())
 		}
 
 		#[bench]
 		fn part2(b: &mut test::Bencher) {
-			b.iter(|| assert_eq!(super::super::part2(), 2504))
+			b.iter(|| super::part2())
 		}
 	}
 }
