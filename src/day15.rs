@@ -10,9 +10,19 @@ struct Sensor {
 
 use std::ops::Range;
 
+trait PosDistance {
+	fn distance(&self, to: &Self) -> usize;
+}
+
+impl PosDistance for [isize; 2] {
+	fn distance(&self, to: &Self) -> usize {
+		self[0].abs_diff(to[0]) + self[1].abs_diff(to[1])
+	}
+}
+
 impl Sensor {
 	fn radius(&self) -> usize {
-		self.beacon[0].abs_diff(self.pos[0]) + self.beacon[1].abs_diff(self.pos[1])
+		self.pos.distance(&self.beacon)
 	}
 
 	fn row_range(&self, row: isize, range: Range<isize>)
@@ -26,6 +36,12 @@ impl Sensor {
 		let row_range = intersection_start..(intersection_start + 2 * delta + 1);
 		if row_range.end < range.start { return None }
 		Some(row_range.start.max(range.start)..row_range.end.min(range.end))
+	}
+}
+
+impl PosDistance for Sensor {
+	fn distance(&self, to: &Self) -> usize {
+		self.pos.distance(&to.pos)
 	}
 }
 
@@ -111,6 +127,34 @@ fn part2_naive<const MAX: usize>(input_sensors: impl Iterator<Item = Sensor>) ->
 
 	x as usize * 4_000_000 + y as usize
 }
+
+fn part2_impl<const MAX: usize>(input_sensors: impl Iterator<Item = Sensor>) -> usize {
+	use itertools::Itertools as _;
+
+	let input_sensors = input_sensors.collect::<Vec<_>>();
+
+	// fn intersections(s0: &Sensor, s1: &Sensor) -> [isize; 2] {
+
+	// }
+
+	let triplets = input_sensors.iter()
+		.tuple_combinations()
+		.filter(|(s0, s1)| s0.radius() + s1.radius() + 2 == s0.distance(s1))
+		.flat_map(|(s0, s1)| input_sensors.iter()
+			.filter_map(move |s2| (s0.radius() + s2.radius() > s0.distance(s2)
+				&& s1.radius() + s2.radius() > s1.distance(s2))
+					.then_some((s0, s1, s2))));
+
+	for (s0, s1, s2) in triplets {
+		println!("{},{} ({}) & {},{} ({}) & {},{} ({})",
+			s0.pos[0], s0.pos[1], s0.radius(),
+			s1.pos[0], s1.pos[1], s1.radius(),
+			s2.pos[0], s2.pos[1], s2.radius());
+	}
+
+	todo!()
+}
+
 
 pub(crate) fn part2() -> usize {
 	part2_naive::<4_000_000>(input_sensors())
@@ -227,8 +271,8 @@ fn tests() {
 		Sensor at x=14, y=3: closest beacon is at x=15, y=3
 		Sensor at x=20, y=1: closest beacon is at x=15, y=3
 	" };
-	assert_eq!(part1_impl::<10>(input_sensors_from_str(INPUT)), 26);
-	assert_eq!(part1(), 4737567);
-	assert_eq!(part2_naive::<20>(input_sensors_from_str(INPUT)), 56000011);
-	assert_eq!(part2(), 13267474686239);
+	// assert_eq!(part1_impl::<10>(input_sensors_from_str(INPUT)), 26);
+	// assert_eq!(part1(), 4737567);
+	assert_eq!(part2_impl::<20>(input_sensors_from_str(INPUT)), 56000011);
+	// assert_eq!(part2(), 13267474686239);
 }
