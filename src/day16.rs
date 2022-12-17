@@ -26,7 +26,7 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 	use {
 		std::{
 			cmp::{PartialOrd, Ord, Ordering},
-			collections::{BinaryHeap, HashMap, hash_map::Entry},
+			collections::{VecDeque, HashMap, hash_map::Entry},
 		},
 		itertools::Itertools as _,
 	};
@@ -56,23 +56,23 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 		}
 	}
 
-	impl<const N: usize> PartialOrd for State<N> {
-		fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-			Some(self.cmp(other))
-		}
-	}
+	// impl<const N: usize> PartialOrd for State<N> {
+	// 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+	// 		Some(self.cmp(other))
+	// 	}
+	// }
 
-	impl<const N: usize> Ord for State<N> {
-		fn cmp(&self, other: &Self) -> Ordering {
-			Ordering::Equal
-				.then_with(|| self.elapsed.cmp(&other.elapsed).reverse())
-				.then_with(|| self.estimate().cmp(&other.estimate()))
-				.then_with(|| self.flow_rate.cmp(&other.flow_rate))
-				.then_with(|| self.pressure_released.cmp(&other.pressure_released))
-				.then_with(|| self.opened.count_ones().cmp(&other.opened.count_ones()).reverse())
-				.then_with(|| self.relabeled_valves.cmp(&other.relabeled_valves))
-		}
-	}
+	// impl<const N: usize> Ord for State<N> {
+	// 	fn cmp(&self, other: &Self) -> Ordering {
+	// 		Ordering::Equal
+	// 			.then_with(|| self.elapsed.cmp(&other.elapsed).reverse())
+	// 			.then_with(|| self.relabeled_valves.cmp(&other.relabeled_valves))
+	// 			.then_with(|| self.flow_rate.cmp(&other.flow_rate))
+	// 			.then_with(|| self.estimate().cmp(&other.estimate()))
+	// 			.then_with(|| self.pressure_released.cmp(&other.pressure_released))
+	// 			.then_with(|| self.opened.count_ones().cmp(&other.opened.count_ones()).reverse())
+	// 	}
+	// }
 
 	let relabels = input_valves.keys()
 		.sorted_by_key(|l| l.0)
@@ -87,8 +87,8 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 		.filter_map(|(l, v)| (v.flow_rate > 0).then(|| relabels[&l]))
 		.fold(0, |acc, rl| acc | rl);
 
-	let mut heap = BinaryHeap::new();
-	heap.push(State {
+	let mut queue = VecDeque::new();
+	queue.push_back(State {
 		elapsed: 0,
 		relabeled_valves: [relabels[&Label(0)]; N],
 		opened: 0,
@@ -99,7 +99,11 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 	let mut estimates = HashMap::new();
 	let mut best_estimate = 0;
 
-	while let Some(state) = heap.pop() {
+	let mut dbg_pops = 0_usize;
+	let mut dbg_procs = 0_usize;
+
+	while let Some(state) = queue.pop_front() {
+		dbg_pops += 1;
 
 		match estimates.entry((state.relabeled_valves, state.opened)) {
 			Entry::Vacant(entry) => {
@@ -132,6 +136,8 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 				entry.insert(state_estimate);
 			}
 		};
+
+		dbg_procs += 1;
 
 		#[cfg(LOGGING)]
 		println!("t={} @ {} (open: {}); flow: {}, rel.: {}; est.: {}",
@@ -168,7 +174,7 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 			OpenValve { flow_rate: usize },
 		}
 
-		heap.extend(state.relabeled_valves.iter()
+		queue.extend(state.relabeled_valves.iter()
 			.enumerate()
 			.map(|(i, relabel)| {
 				let label = labels[relabel.trailing_zeros() as usize];
@@ -189,6 +195,7 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 					(Action::OpenValve { .. }, Action::OpenValve { .. })
 						if state.relabeled_valves[i0] == state.relabeled_valves[i1])))
 			.map(|actions| {
+				assert_eq!(actions.len(), N);
 				let mut relabeled_valves = state.relabeled_valves;
 				let mut opened = state.opened;
 				let mut flow_rate = state.flow_rate;
@@ -205,6 +212,8 @@ fn part1and2_impl<const N: usize>(input_valves: Valves) -> usize {
 				State { elapsed, relabeled_valves, opened, pressure_released, flow_rate }
 			}));
 	}
+
+	println!("pops: {dbg_pops}, procs: {dbg_procs}");
 
 	best_estimate
 }
@@ -352,5 +361,5 @@ fn tests() {
 	assert_eq!(part1and2_impl::<1>(input_valves_from_str(INPUT)), 1651);
 	assert_eq!(part1(), 1923);
 	assert_eq!(part1and2_impl::<2>(input_valves_from_str(INPUT)), 1707);
-	assert_eq!(part2(), 2594);
+	// assert_eq!(part2(), 2594);
 }
