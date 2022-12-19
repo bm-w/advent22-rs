@@ -226,7 +226,7 @@ mod fmt {
 		let x_ticks = [*xr.start(), 500, *xr.end()];
 		let x_ticks: [_; 3] = std::array::from_fn(|i| {
 			let x = x_ticks[i];
-			(x, format!("{x:>p$}", p = top_padding))
+			(x, format!("{x:>top_padding$}"))
 		});
 		for y in 0..top_padding {
 			macro_rules! c { ( $tick:expr ) => { $tick.1.chars().nth(y).unwrap() } }
@@ -239,7 +239,7 @@ mod fmt {
 		}
 
 		for y in yr.clone() {
-			write!(f, "{y:>p$} ", p = left_padding)?;
+			write!(f, "{y:>left_padding$} ")?;
 			for x in xr.clone() {
 				f.write_char(if [x, y] == [500, 0] { '+' }
 					else { write_char([x, y]).unwrap_or_else(||

@@ -99,7 +99,7 @@ mod parsing {
 		unsafe { $s.as_ptr().offset_from($s0.as_ptr()) as usize }
 	} }
 
-	fn try_strip_prefix<'s, 'p>(s: &'s str, prefix: &'p str) -> Result<&'s str, &'s str> {
+	fn try_strip_prefix<'s>(s: &'s str, prefix: &str) -> Result<&'s str, &'s str> {
 		s.strip_prefix(prefix).ok_or_else(|| {
 			let p = s.bytes().zip(prefix.bytes()).position(|(s, p)| s != p).unwrap();
 			&s[p..]

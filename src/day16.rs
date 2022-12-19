@@ -230,10 +230,10 @@ mod parsing {
 		let mut bytes = s.bytes();
 		match (bytes.next(), bytes.next()) {
 			(None, _) => Err(LabelError { column: 1, found: None }),
-			(Some(b), _) if !(b'A'..=b'Z').contains(&b) =>
+			(Some(b), _) if !b.is_ascii_uppercase() =>
 				Err(LabelError { column: 1, found: Some(b) }),
 			(_, None) => Err(LabelError { column: 2, found: None }),
-			(_, Some(b)) if !(b'A'..=b'Z').contains(&b) =>
+			(_, Some(b)) if !b.is_ascii_uppercase() =>
 				Err(LabelError { column: 2, found: Some(b) }),
 			(Some(b0), Some(b1)) => Ok((
 				Label((((b0 - b'A') as u16) << 8) + (b1 - b'A') as u16),
@@ -247,7 +247,7 @@ mod parsing {
 		unsafe { $s.as_ptr().offset_from($s0.as_ptr()) as usize }
 	} }
 
-	fn try_strip_prefix<'s, 'p>(s: &'s str, prefix: &'p str) -> Result<&'s str, &'s str> {
+	fn try_strip_prefix<'s>(s: &'s str, prefix: &str) -> Result<&'s str, &'s str> {
 		s.strip_prefix(prefix).ok_or_else(|| {
 			let p = s.bytes().zip(prefix.bytes()).position(|(s, p)| s != p).unwrap();
 			&s[p..]
@@ -330,7 +330,7 @@ impl std::fmt::Display for Label {
 #[cfg(test)]
 impl std::fmt::Debug for Label {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "\"{}\"", self)
+		write!(f, "\"{self}\"")
 	}
 }
 
