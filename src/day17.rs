@@ -69,11 +69,6 @@ trait Rock {
 		let bo = other.shape().bits();
 		bs & bo != 0
 	}
-
-	fn is_stacked_on<Other: Rock>(&self, other: &Other) -> bool {
-		let pos = self.position();
-		(self.shape(), [pos[0], pos[1] - 1]).overlaps(other)
-	}
 }
 
 impl Rock for (RockShape, [usize; 2]) {
@@ -87,6 +82,8 @@ struct Simulation {
 	rock_positions: std::collections::BTreeSet<([usize; 2], usize)>,
 	height: usize,
 	current_rock_position: Option<[usize; 2]>,
+	#[cfg(test)]
+	cycle_height_range: Option<std::ops::Range<usize>>,
 }
 
 impl Simulation {
@@ -147,13 +144,19 @@ impl Simulation {
 
 
 fn input_dirs_from_str(s: &str) -> impl AsRef<[Dir]> {
-	parsing::dirs_from_str(s).unwrap()
+	parsing::try_dirs_from_str(s).unwrap()
+}
+
+fn input_dirs() -> impl AsRef<[Dir]> {
+	input_dirs_from_str(include_str!("day17.txt"))
 }
 
 
+#[allow(dead_code)]
+#[cfg(test)]
 fn part1_impl(input_dirs: impl AsRef<[Dir]>) -> usize {
 	let mut simulation = Simulation::default();
-	for (_dbg_i, dir) in input_dirs.as_ref().iter().cycle().enumerate() {
+	for dir in input_dirs.as_ref().iter().cycle() {
 		simulation.tick(*dir);
 		if simulation.rock_positions.len() == 2022 {
 			return simulation.height;
@@ -162,13 +165,70 @@ fn part1_impl(input_dirs: impl AsRef<[Dir]>) -> usize {
 	unreachable!()
 }
 
-pub(crate) fn part1() -> usize {
-	part1_impl(input_dirs_from_str(include_str!("day17.txt")))
+fn part1and2_impl<const ROCKS: usize>(input_dirs: impl AsRef<[Dir]>) -> usize {
+	use std::{array::from_fn, collections::HashMap};
+	const STATES: usize = 14; // Might need input-specific tuning
+
+	let dirs = input_dirs.as_ref();
+
+	impl Simulation {
+		// Height-independent snapshot of last `STATES` rocks (position from top & shape index)
+		fn state(&self) -> [([usize; 2], usize); STATES] {
+			let height = self.height;
+			let mut iter = self.rock_positions.iter().rev()
+				.map(|([y, x], i)| ([height - y, *x], *i % RockShape::ALL.len()));
+			from_fn(|_| iter.next().unwrap_or(([usize::MAX; 2], usize::MAX)))
+		}
+	}
+
+	let mut simulation = Simulation::default();
+	let mut states = HashMap::with_capacity(dirs.len() * RockShape::ALL.len());
+	let mut limit = None;
+	for (i, dir) in input_dirs.as_ref().iter().enumerate().cycle() {
+		simulation.tick(*dir);
+
+		if simulation.current_rock_position.is_none() {
+			let (rocks_len, height) = (simulation.rock_positions.len(), simulation.height);
+
+			if let Some((limit_rocks_len, estimated_height, prev_height)) = limit {
+				if rocks_len != limit_rocks_len { continue }
+				return estimated_height + (height - prev_height)
+			}
+
+			else if let Some((prev_rocks_len, prev_height))
+				= states.insert((i, simulation.state()), (rocks_len, height)) {
+				let add_len = rocks_len - prev_rocks_len;
+				let cycles = (ROCKS - prev_rocks_len) / add_len;
+				let add_rocks_len = ROCKS - prev_rocks_len - cycles * add_len;
+
+				#[cfg(test)]
+				{ simulation.cycle_height_range = Some(prev_height..height); }
+
+				if add_rocks_len == 0 { return height }
+
+				// Need to simulate a little further to compute additional height
+				limit = Some((
+					rocks_len + add_rocks_len,
+					prev_height + cycles * (height - prev_height),
+					height,
+				));
+			}
+		}
+	}
+
+	unreachable!()
 }
 
+const PART1_ROCKS: usize = 2022;
 
-pub(crate) fn part2() -> &'static str {
-	"WIP"
+pub(crate) fn part1() -> usize {
+	part1and2_impl::<PART1_ROCKS>(input_dirs())
+}
+
+const PART2_ROCKS: usize = 1_000_000_000_000;
+
+pub(crate) fn part2() -> usize {
+	part1and2_impl::<PART2_ROCKS>(input_dirs())
 }
 
 
@@ -179,7 +239,7 @@ mod parsing {
 	#[derive(Debug)]
 	pub(super) struct  DirsError { column: usize, found: u8 }
 
-	pub(super) fn dirs_from_str(s: &str) -> Result<impl AsRef<[Dir]>, DirsError> {
+	pub(super) fn try_dirs_from_str(s: &str) -> Result<impl AsRef<[Dir]>, DirsError> {
 		s.bytes()
 			.take_while(|b| *b != b'\n')
 			.enumerate()
@@ -231,6 +291,8 @@ impl std::fmt::Display for Simulation {
 						(buffers[bi] & 1 << (4 * by + 3 - bx) != 0)
 							.then_some(if current_buffer == Some(bi) { '@' } else { '#' })
 					})
+					.or_else(|| self.cycle_height_range.as_ref()
+						.and_then(|r| r.contains(&y).then_some(':')))
 					.unwrap_or('.'))?;
 			}
 			f.write_char('|')?;
@@ -247,9 +309,33 @@ impl std::fmt::Display for Simulation {
 }
 
 
-#[test]
-fn tests() {
+#[cfg(test)]
+mod tests {
+	use super::*;
+
 	const INPUT: &str = ">>><<><>><<<>><>>><<<>>><<<><<<>><>><<>>";
-	assert_eq!(part1_impl(input_dirs_from_str(INPUT)), 3068);
-	assert_eq!(part1(), 3224);
+
+	#[test]
+	fn all() {
+		assert_eq!(part1and2_impl::<PART1_ROCKS>(input_dirs_from_str(INPUT)), 3068);
+		assert_eq!(part1(), 3224);
+		assert_eq!(part1and2_impl::<PART2_ROCKS>(input_dirs_from_str(INPUT)), 1514285714288);
+		assert_eq!(part2(), 1595988538691);
+	}
+
+	#[cfg(BENCHING)]
+	mod bench {
+		extern crate test;
+
+		#[bench]
+		fn part1_impl(b: &mut test::Bencher) {
+			b.iter(|| super::part1_impl(super::input_dirs_from_str(super::INPUT)))
+		}
+
+		#[bench]
+		fn part1and2_impl(b: &mut test::Bencher) {
+			b.iter(|| super::part1and2_impl::<{super::PART1_ROCKS}>(
+				super::input_dirs_from_str(super::INPUT)))
+		}
+	}
 }
