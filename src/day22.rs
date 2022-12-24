@@ -29,6 +29,8 @@ impl PathDescription {
 	}
 }
 
+#[cfg_attr(LOGGING, derive(Debug))]
+#[derive(Clone, Copy)]
 enum Facing {
 	Right = 0,
 	Down = 1,
@@ -38,11 +40,12 @@ enum Facing {
 
 impl Facing {
 	fn turn(&mut self, turn: &Turn) {
+		use Facing::*;
 		match (&self, turn) {
-			(Facing::Up, Turn::Right) | (Facing::Down, Turn::Left) => *self = Facing::Right,
-			(Facing::Right, Turn::Right) | (Facing::Left, Turn::Left) => *self = Facing::Down,
-			(Facing::Down, Turn::Right) | (Facing::Up, Turn::Left) => *self = Facing::Left,
-			(Facing::Left, Turn::Right) | (Facing::Right, Turn::Left) => *self = Facing::Up,
+			(Down, Turn::Left) | (Up, Turn::Right) => *self = Right,
+			(Left, Turn::Left)| (Right, Turn::Right)  => *self = Down,
+			(Up, Turn::Left) | (Down, Turn::Right) => *self = Left,
+			(Right, Turn::Left)| (Left, Turn::Right)  => *self = Up,
 		}
 	}
 }
@@ -88,22 +91,22 @@ impl Map {
 	}
 
 	fn r#move(&self, pos: &mut usize, facing: &Facing) -> bool {
+		use Facing::*;
+
 		let (ri, [rx, ry], rpos) = self.pos_region(*pos);
 		let [rdx, rdy] = [rx.len(), ry.len()];
 		let ry = (*pos - rpos) / rdx;
 		let x = rx.start + *pos - rpos - ry * rdx;
 
 		let next_pos = match facing {
-			Facing::Right => rpos + ry * rdx + (x - rx.start + 1) % rdx,
-			Facing::Down => {
+			Right => rpos + ry * rdx + (x - rx.start + 1) % rdx,
+			Down => {
 				if *pos + rdx > rpos + rdx * rdy {
 					if ri + 1 == self.regions.len() {
 						self.wrapped_pos_down(x)
 					} else {
 						let next_region = &self.regions[ri + 1];
-						if x < next_region.x.start {
-							self.wrapped_pos_down(x)
-						} else if x >= next_region.x.end {
+						if x < next_region.x.start || x >= next_region.x.end {
 							self.wrapped_pos_down(x)
 						} else {
 							*pos + rx.end - next_region.x.start
@@ -113,16 +116,14 @@ impl Map {
 					*pos + rdx
 				}
 			}
-			Facing::Left => rpos + ry * rdx + (x - rx.start + rdx - 1) % rdx,
-			Facing::Up => {
+			Left => rpos + ry * rdx + (x - rx.start + rdx - 1) % rdx,
+			Up => {
 				if rpos + rdx > *pos {
 					if ri == 0 {
 						self.wrapped_pos_up(x)
 					} else {
 						let next_region = &self.regions[ri - 1];
-						if x < next_region.x.start {
-							self.wrapped_pos_up(x)
-						} else if x >= next_region.x.end {
+						if x < next_region.x.start || x >= next_region.x.end {
 							self.wrapped_pos_up(x)
 						} else {
 							*pos + rx.start - next_region.x.end
@@ -145,6 +146,10 @@ fn input_from_str(s: &str) -> (Map, PathDescription) {
 	parsing::try_input_from_str(s).unwrap()
 }
 
+fn input() -> (Map, PathDescription) {
+	input_from_str(include_str!("day22.txt"))
+}
+
 
 fn part1_impl(input: (Map, PathDescription)) -> u64 {
 	let (input_map, input_path_description) = input;
@@ -160,12 +165,238 @@ fn part1_impl(input: (Map, PathDescription)) -> u64 {
 }
 
 pub(crate) fn part1() -> u64 {
-	part1_impl(input_from_str(include_str!("day22.txt")))
+	part1_impl(input())
 }
 
 
-pub(crate) fn part2() -> &'static str {
-	"WIP"
+struct CubeFace<const SIZE: usize> {
+	map_region: usize,
+	/// Multiples of `SIZE`
+	offset: usize,
+	/// In [`Facing`] order (RDLU), indices of other faces, and
+	/// facings on those faces when arriving there from this face.
+	adjacent_faces: [(usize, Facing); 4],
+}
+
+struct Cube<'m, const SIZE: usize> {
+	map: &'m Map,
+	faces: [CubeFace<SIZE>; 6]
+}
+
+impl<T> std::ops::Index<Facing> for [T] {
+	type Output = T;
+	fn index(&self, index: Facing) -> &Self::Output {
+		&self[index as usize]
+	}
+}
+
+impl<T> std::ops::IndexMut<Facing> for [T] {
+	fn index_mut(&mut self, index: Facing) -> &mut Self::Output {
+		&mut self[index as usize]
+	}
+}
+
+#[allow(dead_code)]
+#[derive(Debug)]
+enum CubeFromMapError {
+	RegionGeometry { map_region: usize },
+	NumberOfFaces { found: usize },
+	DisconnectedFaces,
+}
+
+impl<'m, const SIZE: usize> TryFrom<&'m Map> for Cube<'m, SIZE> {
+	type Error = CubeFromMapError; // TODO(bm-w): Better error…
+	fn try_from(map: &'m Map) -> Result<Self, Self::Error> {
+		use {CubeFromMapError as E, itertools::{Either, iproduct}};
+
+		let faces = {
+			let mut iter = map.regions.iter()
+				.scan(0, |y, region| { let ry = *y; *y += region.dy; Some((region, ry)) })
+				.enumerate()
+				.flat_map(|(r, (region, y))| {
+					if region.x.start % SIZE != 0
+							|| region.x.len() % SIZE != 0
+							|| region.dy % SIZE != 0
+							|| region.x.len() != SIZE && region.dy != SIZE {
+						return Either::Left(std::iter::once(
+							Err(E::RegionGeometry { map_region: r })));
+					}
+
+					let (i, di) = (region.x.start / SIZE, region.x.len() / SIZE);
+					let (j, dj) = (y / SIZE, region.dy / SIZE);
+					Either::Right(iproduct!(i..i + di, j..j + dj)
+						.enumerate()
+						.map(move |(k, (i, j))| Ok(([i, j], r, k))))
+				});
+			let mut arr = [([usize::MAX, usize::MAX], usize::MAX, usize::MAX); 6];
+			for (f, elt) in arr.iter_mut().enumerate() {
+				*elt = iter.next().ok_or(E::NumberOfFaces { found: f })??
+			}
+			if iter.next().is_some() { return Err(E::NumberOfFaces { found: 7 + iter.count() }) }
+			arr
+		};
+
+		fn checked_add_signed(pos: &[usize; 2], d: [isize; 2]) -> Option<[usize; 2]> {
+			pos[0].checked_add_signed(d[0])
+				.and_then(|x| pos[1].checked_add_signed(d[1]).map(|y| [x, y]))
+		}
+
+		impl Facing {
+			fn dij(&self) -> [isize; 2] {
+				use Facing::*;
+				match self {
+					Right => [1, 0],
+					Down => [0, 1],
+					Left => [-1, 0],
+					Up => [0, -1],
+				}
+			}
+
+			fn inverse(&self) -> Self {
+				use Facing::*;
+				match self { Right => Left, Down => Up, Left => Right, Up => Down }
+			}
+
+			fn turned(&self, turn: &Turn) -> Self {
+				let mut copy = *self;
+				copy.turn(turn);
+				copy
+			}
+		}
+
+		impl Turn {
+			fn inverse(&self) -> Self {
+				use Turn::*;
+				match self { Left => Right, Right => Left}
+			}
+		}
+
+		let mut adj = [[(usize::MAX, Facing::Right); 4]; 6];
+		let mut prev_found = 0;
+		loop {
+			let mut found = 0;
+			for f in 0..6 {
+				let (ij, _, _) = &faces[f];
+				for facing in [Facing::Right, Facing::Down, Facing::Left, Facing::Up] {
+					if adj[f][facing].0 != usize::MAX { found += 1; continue }
+					if let Some(cf) = checked_add_signed(ij, facing.dij())
+							.and_then(|cij| faces.iter().position(|(ij, _, _)| *ij == cij)) {
+						adj[f][facing] = (cf, facing);
+						adj[cf][facing.inverse()] = (f, facing.inverse());
+						found += if f > cf { 2 } else { 1 };
+					} else { for turn in &[Turn::Left, Turn::Right] {
+						let (vf, via_facing) = adj[f][facing.turned(turn)];
+						if vf == usize::MAX { continue }
+						let (cf, conn_prefacing) = adj[vf][via_facing.turned(&turn.inverse())];
+						if cf == usize::MAX { continue }
+						let conn_facing = conn_prefacing.turned(turn);
+						adj[f][facing] = (cf, conn_facing);
+						adj[cf][conn_facing.inverse()] = (f, facing.inverse());
+						found += if f > cf { 2 } else { 1 };
+						break
+					} }
+				}
+			}
+			if found == 6 * 4 { break }
+			else if found == prev_found { return Err(E::DisconnectedFaces); }
+			else { prev_found = found }
+		}
+
+		Ok(Cube { map, faces: std::array::from_fn(|f| {
+			let (_, map_region, offset) = faces[f];
+			CubeFace { map_region, offset, adjacent_faces: adj[f] }
+		}) })
+	}
+}
+
+
+impl<const SIZE: usize> Cube<'_, SIZE> {
+	fn pos_from_face(&self, face: &CubeFace<SIZE>, [x, y]: [usize; 2]) -> usize {
+		let map_region = &self.map.regions[face.map_region];
+		let mrdx = map_region.x.len();
+		let [x, y] = if mrdx > map_region.dy { [face.offset * SIZE + x, y] }
+			else { [x, face.offset * SIZE + y] };
+		self.map.regions[..face.map_region].iter()
+			.map(|r| r.x.len() * r.dy)
+			.sum::<usize>() + y * mrdx + x
+	}
+
+	fn r#move(&self, pos: &mut usize, facing: &mut Facing) -> bool {
+		use Facing::*;
+
+		let (mr, [mrx, _], mrpos) = self.map.pos_region(*pos);
+		let (face, x, y) = {
+			let [mrx, mry] = [(*pos - mrpos) % mrx.len(), (*pos - mrpos) / mrx.len()];
+			let o = (mrx / SIZE).max(mry / SIZE);
+			let face = self.faces.iter().find(|f| f.map_region == mr && f.offset == o).unwrap();
+			(face, mrx % SIZE, mry % SIZE)
+		};
+
+		macro_rules! wrap { ( $face:expr, $facing:expr, $match_next_facing:tt ) => { {
+			let (next_f, next_facing) = $face.adjacent_faces[$facing];
+			let [x, y] = match next_facing $match_next_facing;
+			(self.pos_from_face(&self.faces[next_f], [x, y]), next_facing)
+		} } }
+
+		let (next_pos, next_facing) = match *facing {
+			Right if x < SIZE - 1 => (*pos + 1, *facing),
+			Right => wrap!(face, *facing, {
+				Right => [0, y],
+				Down => [SIZE - y - 1, 0],
+				Left => [SIZE - 1, SIZE - y - 1],
+				Up => [y, SIZE - 1],
+			}),
+			Down if y < SIZE - 1 => (*pos + mrx.len(), *facing),
+			Down => wrap!(face, *facing, {
+				Right => [0, SIZE - x - 1],
+				Down => [x, 0],
+				Left => [SIZE - 1, x],
+				Up => [SIZE - x - 1, SIZE - 1],
+			}),
+			Left if x > 0 => (*pos - 1, *facing),
+			Left => wrap!(face, *facing, {
+				Right => [0, SIZE - y - 1],
+				Down => [y, 0],
+				Left => [SIZE - 1, y],
+				Up => [SIZE - y - 1, SIZE - 1],
+			}),
+			Up if y > 0 => (*pos - mrx.len(), *facing),
+			Up => wrap!(face, *facing, {
+				Right => [0, x],
+				Down => [SIZE - x - 1, 0],
+				Left => [SIZE - 1, SIZE - x - 1],
+				Up => [x, SIZE - 1],
+			}),
+		};
+
+		#[cfg(LOGGING)]
+		println!("{pos:?} ({facing:?}) -> {next_pos:?} ({next_facing:?}){}",
+			if matches!(&self.map.spaces[next_pos], Space::Wall) { " X" } else { "" });
+
+		if matches!(&self.map.spaces[next_pos], Space::Wall) { return false }
+		*pos = next_pos;
+		*facing = next_facing;
+		true
+	}
+}
+
+
+fn part2_impl<const CUBE_SIZE: usize>(input: (Map, PathDescription)) -> u64 {
+	let (input_map, input_path_description) = input;
+	let input_cube = Cube::<CUBE_SIZE>::try_from(&input_map).unwrap();
+
+	let mut state = (input_cube.map.start_space, Facing::Right);
+	for (steps, turn) in input_path_description.iter() {
+		for _ in 0..*steps { if !input_cube.r#move(&mut state.0, &mut state.1) { break } }
+		if let Some(turn) = turn { state.1.turn(turn) }
+	}
+
+	let [x, y] = input_map.pos_xy(state.0);
+	(y as u64 + 1) * 1000 + (x as u64 + 1) * 4 + state.1 as u64
+}
+
+pub(crate) fn part2() -> u64 {
+	part2_impl::<50>(input())
 }
 
 
@@ -408,4 +639,6 @@ fn tests() {
 	" };
 	assert_eq!(part1_impl(input_from_str(INPUT)), 6032);
 	assert_eq!(part1(), 13566);
+	assert_eq!(part2_impl::<4>(input_from_str(INPUT)), 5031);
+	assert_eq!(part2(), 11451);
 }
