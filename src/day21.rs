@@ -68,7 +68,7 @@ fn resolve(monkey: &str, input_monkeys: &mut Monkeys, resolve_human: bool) -> u6
 	let get_number = |label|
 		// SAFETY: Mutably borrowed by `iter_mut` below, which only lets values be mutated
 		// in place without mutating the `HashMap`’s overall structure. No concurrency.
-		unsafe { &*monkeys_ptr }
+		unsafe { &**monkeys_ptr }
 			.get(label)
 			.and_then(|job| match job {
 				Job::Number(number) if resolve_human || label != HUMAN => Some(*number),
@@ -202,12 +202,11 @@ mod parsing {
 		s.bytes()
 			.take(4)
 			.enumerate()
-			.map(|(c, b)| match b {
+			.try_for_each(|(c, b)| match b {
 				b if b.is_ascii_whitespace() => Err(Len { found: c }),
 				b if !b.is_ascii_lowercase() => Err(Invalid { column: c + 1, found: b as char }),
 				_ => Ok(())
-			})
-			.collect::<Result<(), _>>()?;
+			})?;
 		Ok((&s[..4], &s[4..]))
 	}
 
