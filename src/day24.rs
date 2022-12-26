@@ -1,27 +1,19 @@
 // Copyright (c) 2022 Bastiaan Marinus van de Weerd
 
 
-enum Dir { Backward, Forward }
-
-struct Blizzard {
-	/// Initial distance from corresponding edge (wall).
-	start: usize,
-	/// Northward / southward for blizzards corresponding to the north edge (wall),
-	/// westward / eastward for those corresponding to the west edge (wall).
-	dir: Dir,
-}
+enum Dir { North, East, South, West, }
 
 struct Valley {
-	/// Also implies valley size (East->West and North->South, excluding walls).
-	blizzards: [Vec<Vec<Blizzard>>; 2],
+	/// Blizzard direction (if any) initially at corresponding position.
+	blizzards: Vec<Option<Dir>>,
+	/// West-east valley length.
+	stride: usize,
 }
 
-enum Axis { X, Y }
-
 impl Valley {
-	// X span (excl. east / west walls), Y span (incl. north / south walls), & area (the product).
+	// West-east valley length (excl. walls), south-north valley length (incl. walls), & area.
 	fn geometry(&self) -> ([usize; 2], usize) {
-		let [dx, dy] = [self.blizzards[0].len(), self.blizzards[1].len() + 2];
+		let [dx, dy] = [self.stride, self.blizzards.len() / self.stride + 2];
 		([dx, dy], dx * dy)
 	}
 
@@ -37,57 +29,27 @@ impl Valley {
 	}
 
 	/// Hits from blizzards at `pos` & `time`.
-	fn for_each_blizzard_hit<'s>(
-		&'s self,
-		pos: usize,
-		time: usize,
-		mut f: impl FnMut(Axis, &'s Blizzard, &mut bool)
-	) {
-		if pos == 0 { return }
+	fn blizzard_hits(&self, pos: usize, time: usize) -> [bool; 4] {
+		if pos == 0 { return [false, false, false, false] }
 		let ([dx, dy], area) = self.geometry();
 		let [x, y] = [pos % dx, pos / dx];
-		if pos == area - 1 { return }
+		if pos == area - 1 { return [false, false, false, false] }
 
-		let mut stop = false;
+		macro_rules! blizzard_matches_dir { ( $bx:expr, $by:expr, $dir:ident ) => {
+			matches!(self.blizzards[dx * $by + $bx], Some(Dir::$dir))
+		} }
 
-		for b in &self.blizzards[1][y - 1] {
-			let bx = match b.dir {
-				Dir::Backward => (b.start + dx - time % dx) % dx,
-				Dir::Forward => (b.start + time) % dx,
-			};
-			if bx == x { f(Axis::X, b, &mut stop) }
-			if stop { return }
-		}
+		let north = blizzard_matches_dir!(x, (y - 1 + time) % (dy - 2), North);
+		let east = blizzard_matches_dir!((x + dx - time % dx) % dx, y - 1, East);
+		let south = blizzard_matches_dir!(x, (y + dy - 3 - time % (dy - 2)) % (dy - 2), South);
+		let west = blizzard_matches_dir!((x + time) % dx, y - 1, West);
 
-		for b in &self.blizzards[0][x] {
-			let by = match b.dir {
-				Dir::Backward => 1 + (b.start + dy - 2 - time % (dy - 2)) % (dy - 2),
-				Dir::Forward => 1 + (b.start + time) % (dy - 2),
-			};
-			if by == y { f(Axis::Y, b, &mut stop) }
-			if stop { return }
-		}
-	}
-
-	#[cfg(LOGGING)]
-	/// All hits at `pos` & `time` from blizzards moving in X & Y directions, backward & forward.
-	fn blizzard_hits(&self, pos: usize, time: usize) -> [[Option<&Blizzard>; 2]; 2] {
-		let mut hits = [[None, None], [None, None]];
-
-		let axis_idx = |axis| match axis { Axis::X => 0, _ => 1 };
-		let dir_idx = |dir| match dir { &Dir::Backward => 0, _ => 1 };
-		self.for_each_blizzard_hit(pos, time, |axis, blizzard, _| {
-			hits[axis_idx(axis)][dir_idx(&blizzard.dir)] = Some(blizzard)
-		});
-
-		hits
+		[north, east, south, west]
 	}
 
 	/// Returns whether any blizzard hits `pos` at `time`.
 	fn is_position_hit_by_blizzard(&self, pos: usize, time: usize) -> bool {
-		let mut is_hit = false;
-		self.for_each_blizzard_hit(pos, time, |_, _, stop| { is_hit = true; *stop = true });
-		is_hit
+		self.blizzard_hits(pos, time).contains(&true)
 	}
 
 	/// Non-wall positions adjacent to `pos` not hit by any blizzards at `time`.
@@ -256,7 +218,7 @@ pub(crate) fn part2() -> usize {
 
 mod parsing {
 	use std::str::FromStr;
-	use super::{Dir, Blizzard, Valley};
+	use super::{Dir, Valley};
 
 	fn try_strip_prefix<'s>(s: &'s str, prefix: &str) -> Result<&'s str, &'s str> {
 		s.strip_prefix(prefix).ok_or_else(|| {
@@ -283,8 +245,8 @@ mod parsing {
 		fn from_str(s: &str) -> Result<Self, Self::Err> {
 			use ValleyError as E;
 
-			let mut blizzards = (Option::<Vec<Vec<Blizzard>>>::None, vec![]);
-			macro_rules! len { () => { blizzards.0.as_ref().map(|bb| bb.len()) } }
+			let mut blizzards = vec![];
+			let mut len = None;
 
 			let (mut c, mut l, mut cx0, mut south_edge) = (0, 0, 0, false);
 
@@ -293,9 +255,9 @@ mod parsing {
 			} }
 
 			while c < s.len() {
-				if Some(c) == len!() { return Err(
-					E::LineLen { line: l + 1, len: len!(), found: c + 1 }) }
-				match blizzards.0.as_mut() {
+				if Some(c) == len { return Err(
+					E::LineLen { line: l + 1, len, found: c + 1 }) }
+				match len {
 					None => {
 						_ = try_strip_prefix(s, "#.#").map_err(|e| if e.is_empty() {
 							E::LineLen { line: 1, len: None, found: str_offset!(s, e) }
@@ -303,16 +265,13 @@ mod parsing {
 							inv_byte_err!(s.len() - e.len(), e.as_bytes()[0])
 						})?;
 
-						let len = s.bytes().position(|b| b == b'\n').ok_or(E::EndOfString)?;
-						blizzards.0 = Some(Vec::from_iter(
-							std::iter::from_fn(|| Some(vec![])).take(len - 2)));
-						l = 1;
-						c = len + 1;
+						len = Some(s.bytes().position(|b| b == b'\n').ok_or(E::EndOfString)?);
+						c = len.unwrap() + 1;
 						cx0 = c;
 					}
-					Some(x_blizzards) => {
+					Some(len) => {
 						if c >= s.len() { return Err(E::EndOfString); }
-						let (cx, len) = (c - cx0, x_blizzards.len() + 2);
+						let cx = c - cx0;
 
 						macro_rules! ret_line_len_err { () => {
 							return Err(E::LineLen { line: l + 1, len: Some(len), found: cx + 1 })
@@ -330,18 +289,14 @@ mod parsing {
 							b'#' if south_edge && cx < len - 2 => (),
 							b'.' if south_edge && cx == len - 2 => (),
 							found if south_edge => return Err(inv_byte_err!(cx, found)),
-							_ if blizzards.1.len() < l => {
-								// dbg!(l, cx, s.as_bytes()[c] as char, blizzards.1.len());
-								blizzards.1.push(vec![]); continue }
-							b'.' if cx > 0 && cx < len - 1 => (),
+							b'.' if cx > 0 && cx < len - 1 => blizzards.push(None),
 							b @ (b'^'|b'v') => {
-								let dir = if b == b'^' { Dir::Backward } else { Dir::Forward };
-								x_blizzards[cx - 1].push(Blizzard { start: l - 1, dir })
+								let dir = if b == b'^' { Dir::North } else { Dir::South };
+								blizzards.push(Some(dir));
 							}
 							b @ (b'<'|b'>') => {
-								let dir = if b == b'<' { Dir::Backward } else { Dir::Forward };
-								blizzards.1.last_mut().unwrap().push(
-									Blizzard { start: cx - 1, dir })
+								let dir = if b == b'<' { Dir::West } else { Dir::East };
+								blizzards.push(Some(dir));
 							}
 							found => return Err(inv_byte_err!(cx, found))
 						}
@@ -351,11 +306,10 @@ mod parsing {
 				}
 			}
 
-			let Some(blizzards_x) = blizzards.0 else { return Err(E::EndOfString) };
-			if !south_edge || c > cx0 && c - cx0 < blizzards_x.len() + 2 {
-				return Err(E::EndOfString) };
+			let Some(len) = len else { return Err(E::EndOfString) };
+			if !south_edge || c > cx0 && c - cx0 < len { panic!() }//return Err(E::EndOfString) };
 
-			Ok(Valley { blizzards: [blizzards_x, blizzards.1] })
+			Ok(Valley { blizzards, stride: len - 2 })
 		}
 	}
 }
@@ -376,15 +330,14 @@ impl Valley {
 			for x in 0..dx {
 				let p = y * dx + x;
 				f.write_char(pos(p).unwrap_or_else(|| match self.blizzard_hits(y * dx + x, time) {
-					[[None, None], [None, None]] => '.',
-					[[Some(_), None], [None, None]] => '<',
-					[[None, Some(_)], [None, None]] => '>',
-					[[None, None], [Some(_), None]] => '^',
-					[[None, None], [None, Some(_)]] => 'v',
+					[false, false, false, false] => '.',
+					[true, false, false, false] => '^',
+					[false, true, false, false] => '>',
+					[false, false, true, false] => 'v',
+					[false, false, false, true] => '<',
 					hits => (b'a' + hits.into_iter()
-						.flatten()
 						.enumerate()
-						.map(|(i, b)| u8::from(b.is_some()) << (3 - i))
+						.map(|(i, b)| u8::from(b) << (3 - i))
 						.fold(0, |acc, b| acc | b)) as char,
 				}))?
 			}
