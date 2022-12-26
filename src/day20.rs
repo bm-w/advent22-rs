@@ -30,7 +30,6 @@ fn part1and2_impl<const MIXES: usize, const DECRYPTION_KEY: i64>(
 			next: i + 1 })
 		.collect::<Vec<_>>();
 	let len = cells.len();
-	dbg!(len);
 	cells[0].prev = len - 1;
 	cells[len - 1].next = 0;
 
