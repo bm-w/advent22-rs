@@ -205,14 +205,18 @@ pub(crate) fn part1() -> usize {
 }
 
 
-fn part2_impl(input_valley: Valley) -> usize {
-	let t0 = part1and2_impl::<false>(&input_valley, 0);
+fn part2_impl(input_valley: Valley, part1: Option<usize>) -> usize {
+	let t0 = part1.unwrap_or_else(|| part1and2_impl::<false>(&input_valley, 0));
 	let t1 = part1and2_impl::<true>(&input_valley, t0);
 	t0 + t1 + part1and2_impl::<false>(&input_valley, t0 + t1)
 }
 
+fn part2_cached(part1: Option<usize>) -> usize {
+	part2_impl(input_valley(), part1)
+}
+
 pub(crate) fn part2() -> usize {
-	part2_impl(input_valley())
+	part2_cached(None)
 }
 
 
@@ -382,7 +386,7 @@ fn tests() {
 	assert_eq!(part1_impl(input_valley_from_str(INPUTS[0])), 10);
 	assert_eq!(part1_impl(input_valley_from_str(INPUTS[1])), 18);
 	assert_eq!(part1(), 322);
-	assert_eq!(part2_impl(input_valley_from_str(INPUTS[0])), 30);
-	assert_eq!(part2_impl(input_valley_from_str(INPUTS[1])), 54);
-	assert_eq!(part2(), 974);
+	assert_eq!(part2_impl(input_valley_from_str(INPUTS[0]), Some(10)), 30);
+	assert_eq!(part2_impl(input_valley_from_str(INPUTS[1]), Some(18)), 54);
+	assert_eq!(part2_cached(Some(322)), 974);
 }
