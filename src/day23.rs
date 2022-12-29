@@ -15,48 +15,55 @@ impl Elves {
 
 	/// Returns whether any elves moved.
 	fn tick(&mut self, t: usize) -> bool {
-		use std::collections::{HashMap, hash_map::Entry};
+		use std::collections::HashSet;
+		use rayon::{prelude::{IntoParallelRefIterator, ParallelIterator}, slice::ParallelSliceMut};
 
-		let mut proposed_moves = HashMap::new();
-		for elf_pos in &self.0 {
+		let mut all_proposed_moves = self.0.par_iter().filter_map(|elf_pos| {
 			let adj_poss = Self::adjacent_positions(*elf_pos);
-			if !adj_poss.iter().any(|pos| self.0.contains(pos)) { continue }
+			if !adj_poss.iter().any(|pos| self.0.contains(pos)) { return None }
 
-			for (i, adj_pp) in [[1, 2, 0], [6, 7, 5], [3, 5, 0], [4, 7, 2]]
-				.into_iter()
+			[[1, 2, 0], [6, 7, 5], [3, 5, 0], [4, 7, 2]].into_iter()
 				.enumerate()
 				.cycle()
 				.skip(t % 4)
 				.take(4)
-			{
-				if adj_pp.into_iter().any(|p| self.0.contains(&adj_poss[p])) { continue }
+				.find_map(|(i, adj_pp)| {
+					if adj_pp.into_iter().any(|p| self.0.contains(&adj_poss[p])) { return None }
 
-				let proposed_move = match i {
-					0 => [elf_pos[0], elf_pos[1] - 1],
-					1 => [elf_pos[0], elf_pos[1] + 1],
-					2 => [elf_pos[0] - 1, elf_pos[1]],
-					_ => [elf_pos[0] + 1, elf_pos[1]],
-				};
+					let proposed_move = match i {
+						0 => [elf_pos[0], elf_pos[1] - 1],
+						1 => [elf_pos[0], elf_pos[1] + 1],
+						2 => [elf_pos[0] - 1, elf_pos[1]],
+						_ => [elf_pos[0] + 1, elf_pos[1]],
+					};
 
-				match proposed_moves.entry(proposed_move) {
-					Entry::Vacant(entry) => { entry.insert(Some(*elf_pos)); true }
-					Entry::Occupied(mut entry) => { entry.insert(None); false }
-				};
+					Some((proposed_move, *elf_pos))
+				})
+		}).collect::<Vec<_>>();
 
-				break
+		all_proposed_moves.par_sort_unstable_by_key(|(proposed_pos, _)| *proposed_pos);
+		let mut contested_proposed_poss = HashSet::new();
+		let mut prev_proposed_pos = None;
+		for &(proposed_pos, _) in &all_proposed_moves {
+			if Some(proposed_pos) == std::mem::replace(&mut prev_proposed_pos, Some(proposed_pos)) {
+				contested_proposed_poss.insert(proposed_pos);
 			}
 		}
 
 		#[cfg(LOGGING)]
 		{
 			let mut s = String::new();
+			let proposed_moves = all_proposed_moves.iter()
+				.filter(|(pp, _)| !contested_proposed_poss.contains(pp))
+				.map(|(pp, fp)| (*pp, Some(*fp)))
+				.collect::<std::collections::HashMap<_, _>>();
 			self.fmt_proposed_moves(&mut s, &proposed_moves).unwrap();
 			println!("t = {t}\n{s}\n");
 		}
 
 		let mut any_moved = false;
-		for (proposed_pos, from_pos) in proposed_moves {
-			let Some(from_pos) = from_pos else { continue };
+		for (proposed_pos, from_pos) in all_proposed_moves {
+			if contested_proposed_poss.contains(&proposed_pos) { continue }
 			assert!(self.0.remove(&from_pos));
 			assert!(self.0.insert(proposed_pos));
 			any_moved = true;
